@@ -16,39 +16,40 @@ plt.switch_backend('agg')
 import matplotlib.backends.backend_pdf
 import tools.transformations as tr
 from tools.pose_evaluation_utils import quat_pose_to_mat
-
+from scipy.spatial.transform import Rotation
 
 class kittiOdomEval():
     def __init__(self, config):
-        assert os.path.exists(config.gt_dir), "Error of ground_truth pose path!"
-        gt_files = glob.glob(config.gt_dir + '/*.txt')
-        gt_files = [os.path.split(f)[1] for f in gt_files]
-        self.seqs_with_gt = [os.path.splitext(f)[0] for f in gt_files]
-
         self.lengths = [100,200,300,400,500,600,700,800]
         self.num_lengths = len(self.lengths)
         self.gt_dir     = config.gt_dir
-        self.result_dir = config.result_dir
+        self.pose_dir  = config.pose_dir
+        self.dataset_dir = config.dataset_dir
         self.eval_seqs  = []
+        # gt_files = glob.glob(config.gt_dir + '/*.txt')
+        # gt_files = [os.path.split(f)[1] for f in gt_files]
+        # self.seqs_with_gt = [os.path.splitext(f)[0] for f in gt_files]
         
         # evalute all files in the folder
         if config.eva_seqs == '*':
-            if not os.path.exists(self.result_dir):
+            if not os.path.exists(self.dataset_dir):
                 print('File path error!')
                 exit()
-            if os.path.exists(self.result_dir + '/all_stats.txt'): 
-                os.remove(self.result_dir + '/all_stats.txt')
-            files = glob.glob(self.result_dir + '/*.txt')
-            assert files, "There is not trajectory files in: {}".format(self.result_dir)
-            for f in files:
-                dirname, basename = os.path.split(f)
-                file_name = os.path.splitext(basename)[0]
-                self.eval_seqs.append(str(file_name))
+            # if os.path.exists(self.result_dir + '/all_stats.txt'): 
+            #     os.remove(self.result_dir + '/all_stats.txt')
+            # files = glob.glob(self.result_dir + '/*.txt')
+            # assert files, "There is not trajectory files in: {}".format(self.result_dir)
+            # for f in files:
+            #     dirname, basename = os.path.split(f)
+            #     file_name = os.path.splitext(basename)[0]
+            #     self.eval_seqs.append(str(file_name))
+            for name in os.listdir(self.dataset_dir):
+                if os.path.isdir(os.path.join(self.dataset_dir, name)):
+                    self.eval_seqs.append(str(name))
         else:
             seqs = config.eva_seqs.split(',')
             self.eval_seqs = [str(s) for s in seqs]
 
-        self.eval_seqs = [s[:-5] for s in self.eval_seqs]    # xxxx_pred => xxxx
 
         # # Ref: https://github.com/MichaelGrupp/evo/wiki/Plotting
         # os.system("evo_config set plot_seaborn_style whitegrid \
@@ -74,8 +75,7 @@ class kittiOdomEval():
     def loadPoses(self, file_name, toCameraCoord):
         '''
             Each line in the file should follow one of the following structures
-            (1) idx pose(3x4 matrix in terms of 12 numbers)
-            (2) pose(3x4 matrix in terms of 12 numbers)
+            time x y z rx ry rz rw
         '''
         f = open(file_name, 'r')
         s = f.readlines()
@@ -86,14 +86,16 @@ class kittiOdomEval():
         for cnt, line in enumerate(s):
             P = np.eye(4)
             line_split = [float(i) for i in line.split()]
-            withIdx = int(len(line_split)==13)
-            for row in range(3):
-                for col in range(4):
-                    P[row, col] = line_split[row*4 + col + withIdx]
-            if withIdx:
-                frame_idx = line_split[0]
-            else:
-                frame_idx = cnt
+            # xyz
+            P[0, 3] = line_split[1]
+            P[1, 3] = line_split[2]
+            P[2, 3] = line_split[3]
+            # Q to R
+            q = np.array([line_split[7],line_split[4],line_split[5],line_split[6]]) #wxyz
+            r = Rotation.from_quat(q)
+            rot_mat = r.as_matrix()
+            P[0:3, 0:3] = rot_mat
+            frame_idx = cnt
             if toCameraCoord:
                 poses[frame_idx] = self.toCameraCoord(P)
             else:
@@ -549,18 +551,23 @@ class kittiOdomEval():
         '''
             to_camera_coord: whether the predicted pose needs to be convert to camera coordinate
         '''
-        eval_dir = self.result_dir
-        if not os.path.exists(eval_dir): os.makedirs(eval_dir)
+        # eval_dir = self.result_dir
+        # if not os.path.exists(eval_dir): os.makedirs(eval_dir)
 
         total_err = []
         ave_errs = {}       
         for seq in self.eval_seqs:
-            eva_seq_dir = os.path.join(eval_dir, '{}_eval'.format(seq))
-            pred_file_name = self.result_dir + '/{}_pred.txt'.format(seq)
+            eva_seq_dir = os.path.join(self.dataset_dir, seq)
+            if not os.path.exists(eva_seq_dir): 
+                print("Dir %s couldn't open!"%(eva_seq_dir))
+                exit() 
+            pred_file_name = os.path.join(eva_seq_dir, self.pose_dir)
             # pred_file_name = self.result_dir + '/{}.txt'.format(seq)
-            gt_file_name   = self.gt_dir + '/{}.txt'.format(seq)
+            gt_file_name = os.path.join(eva_seq_dir, self.gt_dir)
+            #gt_file_name   = self.gt_dir + '/{}.txt'.format(seq)
             save_file_name = eva_seq_dir + '/{}.pdf'.format(seq)
             assert os.path.exists(pred_file_name), "File path error: {}".format(pred_file_name)
+            # assert os.path.exists(gt_file_name), "File path error: {}".format(gt_file_name)
             
             # ----------------------------------------------------------------------
             # load pose
@@ -572,9 +579,9 @@ class kittiOdomEval():
             
             poses_result = self.loadPoses(pred_file_name, toCameraCoord=toCameraCoord)
 
-            if not os.path.exists(eva_seq_dir): os.makedirs(eva_seq_dir) 
+            # if not os.path.exists(eva_seq_dir): os.makedirs(eva_seq_dir) 
 
-            if seq not in self.seqs_with_gt:
+            if not os.path.exists(gt_file_name):
                 self.calcSequenceErrors(poses_result, poses_result)
                 print ("\nSequence: " + str(seq))
                 print ('Distance (m): %d' % self.distance)
@@ -652,11 +659,15 @@ class kittiOdomEval():
 
      
 if __name__ == '__main__':
+    # 获取当前文件的绝对路径
+    file_path = os.path.abspath(__file__)
+    # 获取当前文件所在的目录
+    dir_path = os.path.dirname(os.path.dirname(file_path)) # '/home/oliver/catkin_ros2/src/kiss-icp/results
     parser = argparse.ArgumentParser(description='KITTI Evaluation toolkit')
-    parser.add_argument('--dataset_dir',type=str, default='/home/oliver/catkin_ros2/src/kiss-icp/results/', help='Directory path of the testing dataset')
-    parser.add_argument('--gt_dir',     type=str, default='./ground_truth_pose',  help='Directory path of the ground truth odometry')
-    parser.add_argument('--result_dir', type=str, default='./data/',              help='Directory path of storing the odometry results')
-    parser.add_argument('--eva_seqs',   type=str, default='09_pred,10_pred,11_pred',      help='The sequences to be evaluated') 
+    parser.add_argument('--dataset_dir',type=str, default=dir_path, help='Directory path of the testing dataset')
+    parser.add_argument('--gt_dir',     type=str, default='gt_path.txt',  help='Filename of the ground truth odometry')
+    parser.add_argument('--pose_dir',     type=str, default='path.txt',  help='Filename of evaluated odometry')
+    parser.add_argument('--eva_seqs',   type=str, default='seq00',      help='The sequences to be evaluated, split by (,)') 
     # parser.add_argument('--gt_dir',     type=str, default='./ground_truth_pose',  help='Directory path of the ground truth odometry')
     # parser.add_argument('--result_dir', type=str, default='./data/',              help='Directory path of storing the odometry results')
     # parser.add_argument('--eva_seqs',   type=str, default='09_pred,10_pred,11_pred',      help='The sequences to be evaluated') 
