@@ -26,6 +26,7 @@ class kittiOdomEval():
         self.pose_dir  = config.pose_dir
         self.dataset_dir = config.dataset_dir
         self.eval_seqs  = []
+        self.pose_format = config.pose_format
         # gt_files = glob.glob(config.gt_dir + '/*.txt')
         # gt_files = [os.path.split(f)[1] for f in gt_files]
         # self.seqs_with_gt = [os.path.splitext(f)[0] for f in gt_files]
@@ -35,15 +36,11 @@ class kittiOdomEval():
             if not os.path.exists(self.dataset_dir):
                 print('File path error!')
                 exit()
-            # if os.path.exists(self.result_dir + '/all_stats.txt'): 
-            #     os.remove(self.result_dir + '/all_stats.txt')
-            # files = glob.glob(self.result_dir + '/*.txt')
-            # assert files, "There is not trajectory files in: {}".format(self.result_dir)
-            # for f in files:
-            #     dirname, basename = os.path.split(f)
-            #     file_name = os.path.splitext(basename)[0]
-            #     self.eval_seqs.append(str(file_name))
             for name in os.listdir(self.dataset_dir):
+                # 获取name前三位字符
+
+                if (name[0:3] != "seq"): continue
+
                 if os.path.isdir(os.path.join(self.dataset_dir, name)):
                     self.eval_seqs.append(str(name))
         else:
@@ -72,7 +69,7 @@ class kittiOdomEval():
         rot = np.dot(R, R_C2L)
         return rot 
 
-    def loadPoses(self, file_name, toCameraCoord):
+    def loadPoses(self, file_name, toCameraCoord, format):
         '''
             Each line in the file should follow one of the following structures
             time x y z rx ry rz rw
@@ -86,16 +83,29 @@ class kittiOdomEval():
         for cnt, line in enumerate(s):
             P = np.eye(4)
             line_split = [float(i) for i in line.split()]
-            # xyz
-            P[0, 3] = line_split[1]
-            P[1, 3] = line_split[2]
-            P[2, 3] = line_split[3]
-            # Q to R
-            q = np.array([line_split[7],line_split[4],line_split[5],line_split[6]]) #wxyz
-            r = Rotation.from_quat(q)
-            rot_mat = r.as_matrix()
-            P[0:3, 0:3] = rot_mat
-            frame_idx = cnt
+            if(format == 'tum'):
+                # xyz
+                P[0, 3] = line_split[1]
+                P[1, 3] = line_split[2]
+                P[2, 3] = line_split[3]
+                # Q to R
+                q = np.array([line_split[4],line_split[5],line_split[6],line_split[7]]) #xyzw
+                r = Rotation.from_quat(q)
+                rot_mat = r.as_matrix()
+                P[0:3, 0:3] = rot_mat
+                frame_idx = cnt
+            elif(format == 'kitti'):
+                withIdx = int(len(line_split)==13)
+                for row in range(3):
+                    for col in range(4):
+                        P[row, col] = line_split[row*4 + col + withIdx]
+                if withIdx:
+                    frame_idx = line_split[0]
+                else:
+                    frame_idx = cnt
+            else :
+                print('Unknown pose format!')
+                exit()
             if toCameraCoord:
                 poses[frame_idx] = self.toCameraCoord(P)
             else:
@@ -377,7 +387,8 @@ class kittiOdomEval():
             poses_dict["Ground Truth"] = poses_gt
 
         fig = plt.figure(figsize=(8,8), dpi=110)
-        ax = fig.gca(projection='3d')
+        # ax = fig.gca(projection='3d')
+        ax = fig.add_subplot(111, projection='3d')
 
         for key,_ in poses_dict.items():
             plane_point = []
@@ -577,8 +588,7 @@ class kittiOdomEval():
             #     self.call_evo_traj(pred_file_name, save_file_name, gt_file=None)
             #     continue
             
-            poses_result = self.loadPoses(pred_file_name, toCameraCoord=toCameraCoord)
-
+            poses_result = self.loadPoses(pred_file_name, toCameraCoord=toCameraCoord, format = self.pose_format)
             # if not os.path.exists(eva_seq_dir): os.makedirs(eva_seq_dir) 
 
             if not os.path.exists(gt_file_name):
@@ -592,7 +602,7 @@ class kittiOdomEval():
                 self.plotPath_2D_3(seq, None, poses_result, eva_seq_dir)
                 continue
           
-            poses_gt = self.loadPoses(gt_file_name, toCameraCoord=False)
+            poses_gt = self.loadPoses(gt_file_name, toCameraCoord=False, format = self.pose_format)
 
             # ----------------------------------------------------------------------
             # compute sequence errors
@@ -630,10 +640,27 @@ class kittiOdomEval():
 
             plt.close('all')
 
-        # total_avg_segment_errs = self.computeSegmentErr(total_err)
-        # total_avg_speed_errs   = self.computeSpeedErr(total_err)        
-        # self.plotError_segment('total_error_seg', total_avg_segment_errs, eval_dir)
-        # self.plotError_speed('total_error_speed', total_avg_speed_errs, eval_dir)
+        total_avg_segment_errs = self.computeSegmentErr(total_err)
+        total_avg_speed_errs   = self.computeSpeedErr(total_err)
+        # compute overall error
+        ave_t_err, ave_r_err = self.computeOverallErr(total_err)
+        print ("\nSequence All: ")
+        print ("Average sequence translational RMSE (%):   {0:.4f}".format(ave_t_err * 100))
+        print ("Average sequence rotational error (deg/m): {0:.4f}\n".format(ave_r_err/np.pi * 180))
+        with open(self.dataset_dir + '/total_stats.txt', 'w') as f:
+            f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
+            f.writelines('Average sequence rotation error (deg/m):  {0:.4f}'.format(ave_r_err/np.pi * 180))
+            f.writelines('\n\n')
+            for seq, ave_err in ave_errs.items():
+                f.writelines('%s:\n' % seq)
+                f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_err[0] * 100))
+                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n\n'.format(ave_err[1]/np.pi * 180))
+
+
+        # ----------------------------------------------------------------------
+        # Ploting       
+        self.plotError_segment('total_error_seg', total_avg_segment_errs, self.dataset_dir)
+        self.plotError_speed('total_error_speed', total_avg_speed_errs, self.dataset_dir)
 
 
         # if ave_errs:
@@ -664,10 +691,11 @@ if __name__ == '__main__':
     # 获取当前文件所在的目录
     dir_path = os.path.dirname(os.path.dirname(file_path)) # '/home/oliver/catkin_ros2/src/kiss-icp/results
     parser = argparse.ArgumentParser(description='KITTI Evaluation toolkit')
-    parser.add_argument('--dataset_dir',type=str, default=dir_path, help='Directory path of the testing dataset')
+    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230617_kissicp', help='Directory path of the testing dataset')
     parser.add_argument('--gt_dir',     type=str, default='gt_path.txt',  help='Filename of the ground truth odometry')
     parser.add_argument('--pose_dir',     type=str, default='path.txt',  help='Filename of evaluated odometry')
-    parser.add_argument('--eva_seqs',   type=str, default='seq00',      help='The sequences to be evaluated, split by (,)') 
+    parser.add_argument('--eva_seqs',   type=str, default='*',      help='The sequences to be evaluated, split by (,), or (*)')
+    parser.add_argument('--pose_format',     type=str, default='tum',  help='Format of the pose file, kitti or tum')
     # parser.add_argument('--gt_dir',     type=str, default='./ground_truth_pose',  help='Directory path of the ground truth odometry')
     # parser.add_argument('--result_dir', type=str, default='./data/',              help='Directory path of storing the odometry results')
     # parser.add_argument('--eva_seqs',   type=str, default='09_pred,10_pred,11_pred',      help='The sequences to be evaluated') 
