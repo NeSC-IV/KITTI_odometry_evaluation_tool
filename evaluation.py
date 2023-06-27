@@ -17,6 +17,7 @@ import matplotlib.backends.backend_pdf
 import tools.transformations as tr
 from tools.pose_evaluation_utils import quat_pose_to_mat
 from scipy.spatial.transform import Rotation
+import evo.main_ape as ape
 
 class kittiOdomEval():
     def __init__(self, config):
@@ -640,6 +641,12 @@ class kittiOdomEval():
 
             plt.close('all')
 
+            # ----------------------------------------------------------------------
+            # evo ape compute
+            parser = ape.parser()
+            args = parser.parse_args([self.pose_format, gt_file_name, pred_file_name, "-va", "--logfile", eva_seq_dir + "/evo_ape.log", "--plot_mode", "xy", "--save_plot", eva_seq_dir + "/evo_ape"])
+            ape.run(args)
+
         total_avg_segment_errs = self.computeSegmentErr(total_err)
         total_avg_speed_errs   = self.computeSpeedErr(total_err)
         # compute overall error
@@ -691,7 +698,7 @@ if __name__ == '__main__':
     # 获取当前文件所在的目录
     dir_path = os.path.dirname(os.path.dirname(file_path)) # '/home/oliver/catkin_ros2/src/kiss-icp/results
     parser = argparse.ArgumentParser(description='KITTI Evaluation toolkit')
-    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230617_kissicp', help='Directory path of the testing dataset')
+    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230617_L', help='Directory path of the testing dataset') # + '/230627_mul'
     parser.add_argument('--gt_dir',     type=str, default='gt_path.txt',  help='Filename of the ground truth odometry')
     parser.add_argument('--pose_dir',     type=str, default='path.txt',  help='Filename of evaluated odometry')
     parser.add_argument('--eva_seqs',   type=str, default='*',      help='The sequences to be evaluated, split by (,), or (*)')
