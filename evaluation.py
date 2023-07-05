@@ -17,8 +17,8 @@ import matplotlib.backends.backend_pdf
 import tools.transformations as tr
 from tools.pose_evaluation_utils import quat_pose_to_mat
 from scipy.spatial.transform import Rotation
-import evo.main_ape as ape
-
+# import evo.main_ape as ape
+from kiss_icp.metrics import absolute_trajectory_error, sequence_error
 def takeSort(elem):
     return int(elem[3:])
 
@@ -572,7 +572,8 @@ class kittiOdomEval():
         # if not os.path.exists(eval_dir): os.makedirs(eval_dir)
 
         total_err = []
-        ave_errs = {}       
+        ave_errs = {}
+        ate_errs = {}       
         for seq in self.eval_seqs:
             eva_seq_dir = os.path.join(self.dataset_dir, seq)
             if not os.path.exists(eva_seq_dir): 
@@ -625,15 +626,25 @@ class kittiOdomEval():
             # ----------------------------------------------------------------------
             # compute overall error
             ave_t_err, ave_r_err = self.computeOverallErr(seq_err)
+
+            # ----------------------------------------------------------------------
+            # compute absolute error
+            ate_rot, ate_trans = absolute_trajectory_error(list(poses_gt.values()), list(poses_result.values()))
+
             print ("\nSequence: " + str(seq))
             print ('Distance (m): %d' % self.distance)
             print ('Max speed (km/h): %d' % (self.max_speed*3.6))
             print ("Average sequence translational RMSE (%):   {0:.4f}".format(ave_t_err * 100))
-            print ("Average sequence rotational error (deg/m): {0:.4f}\n".format(ave_r_err/np.pi * 180))
+            print ("Average sequence rotational error (deg/m): {0:.4f}".format(ave_r_err/np.pi * 180))
+            print ("Absoulte Trajectory Error (ATE) (m): {0:.4f}".format(ate_trans))
+            print ("Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(ate_rot))
             with open(eva_seq_dir + '/%s_stats.txt' % seq, 'w') as f:
                 f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
-                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}'.format(ave_r_err/np.pi * 180))
+                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_r_err/np.pi * 180))
+                f.writelines("Absoulte Trajectory Error (ATE) (m): {0:.4f}\n".format(ate_trans))
+                f.writelines("Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(ate_rot))
             ave_errs[seq] = [ave_t_err, ave_r_err]
+            ate_errs[seq] = [ate_trans, ate_rot]
 
             # ----------------------------------------------------------------------
             # Ploting
@@ -648,25 +659,51 @@ class kittiOdomEval():
 
             # ----------------------------------------------------------------------
             # evo ape compute
-            parser = ape.parser()
-            args = parser.parse_args([self.pose_format, gt_file_name, pred_file_name, "-va", "--logfile", eva_seq_dir + "/evo_ape.log", "--plot_mode", "xy", "--save_plot", eva_seq_dir + "/evo_ape"])
-            ape.run(args)
+            # parser = ape.parser()
+            # args = parser.parse_args([self.pose_format, gt_file_name, pred_file_name, "-va", "--logfile", eva_seq_dir + "/evo_ape.log", "--plot_mode", "xy", "--save_plot", eva_seq_dir + "/evo_ape"])
+            # ape.run(args)
+
 
         total_avg_segment_errs = self.computeSegmentErr(total_err)
         total_avg_speed_errs   = self.computeSpeedErr(total_err)
         # compute overall error
         ave_t_err, ave_r_err = self.computeOverallErr(total_err)
+        # compute mean error
+        mean_t_err = 0
+        mean_r_err = 0
+        for seq, ave_err in ave_errs.items():
+            mean_t_err += ave_err[0]
+            mean_r_err += ave_err[1]
+        mean_t_err /= len(ave_errs)
+        mean_r_err /= len(ave_errs)
+        mean_at_err = 0
+        mean_ar_err = 0
+        for seq, ate_err in ate_errs.items():
+            mean_at_err += ate_err[0]
+            mean_ar_err += ate_err[1]
+        mean_at_err /= len(ate_errs)
+        mean_ar_err /= len(ate_errs)
         print ("\nSequence All: ")
         print ("Average sequence translational RMSE (%):   {0:.4f}".format(ave_t_err * 100))
-        print ("Average sequence rotational error (deg/m): {0:.4f}\n".format(ave_r_err/np.pi * 180))
+        print ("Average sequence rotational error (deg/m): {0:.4f}".format(ave_r_err/np.pi * 180))
+        print ("Mean sequence translational RMSE (%):   {0:.4f}".format(mean_t_err * 100))
+        print ("Mean sequence rotational error (deg/m): {0:.4f}".format(mean_r_err/np.pi * 180))
+        print ("Mean Absoulte Trajectory Error (ATE) (m): {0:.4f}".format(mean_at_err))
+        print ("Mean Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(mean_ar_err))
         with open(self.dataset_dir + '/total_stats.txt', 'w') as f:
             f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
-            f.writelines('Average sequence rotation error (deg/m):  {0:.4f}'.format(ave_r_err/np.pi * 180))
+            f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_r_err/np.pi * 180))
+            f.writelines('Mean sequence translation RMSE (%):    {0:.4f}\n'.format(mean_t_err * 100))
+            f.writelines('Mean sequence rotation error (deg/m):  {0:.4f}\n'.format(mean_r_err/np.pi * 180))
+            f.writelines("Mean Absoulte Trajectory Error (ATE) (m): {0:.4f}\n".format(mean_at_err))
+            f.writelines("Mean Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(mean_ar_err))
             f.writelines('\n\n')
             for seq, ave_err in ave_errs.items():
                 f.writelines('%s:\n' % seq)
                 f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_err[0] * 100))
-                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n\n'.format(ave_err[1]/np.pi * 180))
+                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_err[1]/np.pi * 180))
+                f.writelines("Absoulte Trajectory Error (ATE) (m): {0:.4f}\n".format(ate_errs[seq][0]))
+                f.writelines("Absoulte Rotational Error (ARE) (rad): {0:.4f}\n\n".format(ate_errs[seq][1]))
 
 
         # ----------------------------------------------------------------------
@@ -703,7 +740,7 @@ if __name__ == '__main__':
     # 获取当前文件所在的目录
     dir_path = os.path.dirname(os.path.dirname(file_path)) # '/home/oliver/catkin_ros2/src/kiss-icp/results
     parser = argparse.ArgumentParser(description='KITTI Evaluation toolkit')
-    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230703_sem', help='Directory path of the testing dataset') # + '/230627_mul'
+    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230704_semn', help='Directory path of the testing dataset') # + '/230627_mul'
     parser.add_argument('--gt_dir',     type=str, default='gt_path.txt',  help='Filename of the ground truth odometry')
     parser.add_argument('--pose_dir',     type=str, default='path.txt',  help='Filename of evaluated odometry')
     parser.add_argument('--eva_seqs',   type=str, default='*',      help='The sequences to be evaluated, split by (,), or (*)')
