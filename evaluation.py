@@ -740,7 +740,7 @@ if __name__ == '__main__':
     # 获取当前文件所在的目录
     dir_path = os.path.dirname(os.path.dirname(file_path)) # '/home/oliver/catkin_ros2/src/kiss-icp/results
     parser = argparse.ArgumentParser(description='KITTI Evaluation toolkit')
-    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230704_semn', help='Directory path of the testing dataset') # + '/230627_mul'
+    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230717_t_kissicp', help='Directory path of the testing dataset') # + '/230627_mul'
     parser.add_argument('--gt_dir',     type=str, default='gt_path.txt',  help='Filename of the ground truth odometry')
     parser.add_argument('--pose_dir',     type=str, default='path.txt',  help='Filename of evaluated odometry')
     parser.add_argument('--eva_seqs',   type=str, default='*',      help='The sequences to be evaluated, split by (,), or (*)')
