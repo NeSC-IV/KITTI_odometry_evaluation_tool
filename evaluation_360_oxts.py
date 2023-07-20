@@ -66,13 +66,13 @@ class kittiOdomEval():
         '''
             Convert the pose of lidar coordinate to camera coordinate
         '''
-        R_C2L = np.array([[0,   0,   1,  0],
-                          [-1,  0,   0,  0],
-                          [0,  -1,   0,  0],
+        R_0 = np.array([[0.83260044, -0.53542514, -0.14176184,  -25.55153578],
+                          [0.53469402,  0.84376707, -0.04646969,  -70.20318989],
+                          [0.14449501, -0.03710853,  0.98880946,  -2.62256587],
                           [0,   0,   0,  1]])
-        inv_R_C2L = np.linalg.inv(R_C2L)            
+        inv_R_C2L = np.linalg.inv(R_0)            
         R = np.dot(inv_R_C2L, pose_mat)
-        rot = np.dot(R, R_C2L)
+        rot = np.dot(R_0, R)
         return rot 
 
     def loadPoses(self, file_name, toCameraCoord, format):
@@ -575,6 +575,7 @@ class kittiOdomEval():
         ave_errs = {}
         ate_errs = {}       
         for seq in self.eval_seqs:
+            self.seq_num = int(seq[3:])
             eva_seq_dir = os.path.join(self.dataset_dir, seq)
             if not os.path.exists(eva_seq_dir): 
                 print("Dir %s couldn't open!"%(eva_seq_dir))
@@ -740,15 +741,15 @@ if __name__ == '__main__':
     # 获取当前文件所在的目录
     dir_path = os.path.dirname(os.path.dirname(file_path)) # '/home/oliver/catkin_ros2/src/kiss-icp/results
     parser = argparse.ArgumentParser(description='KITTI Evaluation toolkit')
-    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230719_r_kissicp', help='Directory path of the testing dataset') # + '/230627_mul'
+    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230718_r_sem', help='Directory path of the testing dataset') # + '/230627_mul'
     parser.add_argument('--gt_dir',     type=str, default='gt_path.txt',  help='Filename of the ground truth odometry')
     parser.add_argument('--pose_dir',     type=str, default='path.txt',  help='Filename of evaluated odometry')
-    parser.add_argument('--eva_seqs',   type=str, default='*',      help='The sequences to be evaluated, split by (,), or (*)')
+    parser.add_argument('--eva_seqs',   type=str, default='seq0',      help='The sequences to be evaluated, split by (,), or (*)')
     parser.add_argument('--pose_format',     type=str, default='tum',  help='Format of the pose file, kitti or tum')
     # parser.add_argument('--gt_dir',     type=str, default='./ground_truth_pose',  help='Directory path of the ground truth odometry')
     # parser.add_argument('--result_dir', type=str, default='./data/',              help='Directory path of storing the odometry results')
     # parser.add_argument('--eva_seqs',   type=str, default='09_pred,10_pred,11_pred',      help='The sequences to be evaluated') 
-    parser.add_argument('--toCameraCoord',   type=lambda x: (str(x).lower() == 'true'), default=False, help='Whether to convert the pose to camera coordinate')
+    parser.add_argument('--toCameraCoord',   type=lambda x: (str(x).lower() == 'true'), default=True, help='Whether to convert the pose to camera coordinate')
 
     args = parser.parse_args()
     pose_eval = kittiOdomEval(args)

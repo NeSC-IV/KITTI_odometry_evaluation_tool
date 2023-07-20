@@ -66,16 +66,15 @@ class kittiOdomEval():
         '''
             Convert the pose of lidar coordinate to camera coordinate
         '''
-        R_C2L = np.array([[0,   0,   1,  0],
-                          [-1,  0,   0,  0],
-                          [0,  -1,   0,  0],
-                          [0,   0,   0,  1]])
-        inv_R_C2L = np.linalg.inv(R_C2L)            
-        R = np.dot(inv_R_C2L, pose_mat)
-        rot = np.dot(R, R_C2L)
+        Tr = np.array([[0.99992906, 0.0057743, 0.01041756, 0.77104934],
+                 [0.00580536, -0.99997879, -0.00295331, 0.29854144],
+                 [0.01040029, 0.00301357, -0.99994137, -0.83628022],
+                 [0, 0, 0, 1]])
+        Tr_inv = np.linalg.inv(Tr)            
+        rot = np.matmul(Tr_inv, np.matmul(pose_mat, Tr))
         return rot 
 
-    def loadPoses(self, file_name, toCameraCoord, format):
+    def loadPoses(self, file_name, toCameraCoord, format, seq_num):
         '''
             Each line in the file should follow one of the following structures
             time x y z rx ry rz rw
@@ -99,7 +98,10 @@ class kittiOdomEval():
                 r = Rotation.from_quat(q)
                 rot_mat = r.as_matrix()
                 P[0:3, 0:3] = rot_mat
-                frame_idx = cnt
+                if seq_num == "02":
+                    frame_idx = 4391 + cnt
+                else:
+                    frame_idx = cnt
             elif(format == 'kitti'):
                 withIdx = int(len(line_split)==13)
                 for row in range(3):
@@ -117,14 +119,54 @@ class kittiOdomEval():
             else:
                 poses[frame_idx] = P
         return poses
+    
+    def loadgtPoses(self, file_name, toCameraCoord, pose_ref, seq_num):
+        '''
+            Each line in the file should follow one of the following structures
+            time x y z rx ry rz rw
+        '''
+        f = open(file_name, 'r')
+        s = f.readlines()
+        f.close()
+        file_len = len(s)
+        poses = {}
+        frame_idx = 0
+        gt_t_p = np.eye(4)
+        untrans = True
+        for cnt, line in enumerate(s):
+            P = np.eye(4)
+            line_split = [float(i) for i in line.split()]
+
+            withIdx = int(len(line_split)==13)
+            for row in range(3):
+                for col in range(4):
+                    P[row, col] = line_split[row*4 + col + withIdx]
+            if withIdx:
+                frame_idx = int(line_split[0])
+            else:
+                frame_idx = cnt
+            if (seq_num == "02") and (frame_idx < 4391):
+                continue
+            if toCameraCoord:
+                poses[frame_idx] = self.toCameraCoord(P)
+            else:
+                poses[frame_idx] = P
+            if untrans:
+                gt_t_p = np.matmul(pose_ref[frame_idx], np.linalg.inv(poses[frame_idx]))
+                poses[frame_idx] = np.matmul(gt_t_p, poses[frame_idx])
+                untrans = False
+            else:
+                poses[frame_idx] = np.matmul(gt_t_p, poses[frame_idx])
+        return poses
 
     def trajectoryDistances(self, poses):
         '''
             Compute the length of the trajectory
             poses dictionary: [frame_idx: pose]
         '''
-        dist = [0]
+        # dist = [0]
         sort_frame_idx = sorted(poses.keys())
+        dist = {sort_frame_idx[0]: 0}
         for i in range(len(sort_frame_idx)-1):
             cur_frame_idx = sort_frame_idx[i]
             next_frame_idx = sort_frame_idx[i+1]
@@ -133,8 +175,8 @@ class kittiOdomEval():
             dx = P1[0,3] - P2[0,3]
             dy = P1[1,3] - P2[1,3]
             dz = P1[2,3] - P2[2,3]
-            dist.append(dist[i]+np.sqrt(dx**2+dy**2+dz**2))    
-        self.distance = dist[-1]
+            dist[sort_frame_idx[i+1]] = dist[sort_frame_idx[i]]+np.sqrt(dx**2+dy**2+dz**2)
+        self.distance = dist[sort_frame_idx[-1]]
         return dist
 
     def rotationError(self, pose_error):
@@ -150,10 +192,12 @@ class kittiOdomEval():
         dz = pose_error[2,3]
         return np.sqrt(dx**2+dy**2+dz**2)
 
-    def lastFrameFromSegmentLength(self, dist, first_frame, len_):
-        for i in range(first_frame, len(dist), 1):
-            if dist[i] > (dist[first_frame] + len_):
-                return i
+    def lastFrameFromSegmentLength(self, dist, first_frame, len_, pose_gt_num):
+        dist_num = sorted(dist.keys())
+        for i in range(pose_gt_num, len(dist_num), 1):
+            dist_num_i = dist_num[i]
+            if dist[dist_num_i] > (dist[first_frame] + len_):
+                return dist_num_i
         return -1
 
     def calcSequenceErrors(self, poses_gt, poses_result):
@@ -162,16 +206,22 @@ class kittiOdomEval():
         # pre-compute distances (from ground truth as reference)
         dist = self.trajectoryDistances(poses_gt)
         # every second, kitti data 10Hz
-        self.step_size = 10
+        # self.step_size = 10
         # for all start positions do
         # for first_frame in range(9, len(poses_gt), self.step_size):
-        for first_frame in range(0, len(poses_gt), self.step_size):
+        sort_frame_idx = sorted(poses_gt.keys())
+        last_fist_frame = -10
+        for pose_gt_num in range(0, len(poses_gt)):
+            first_frame = sort_frame_idx[pose_gt_num]
+            if first_frame - last_fist_frame < 10:
+                continue
+            last_fist_frame = first_frame
             # for all segment lengths do
             for i in range(self.num_lengths):
                 # current length
                 len_ = self.lengths[i]
                 # compute last frame of the segment
-                last_frame = self.lastFrameFromSegmentLength(dist, first_frame, len_)
+                last_frame = self.lastFrameFromSegmentLength(dist, first_frame, len_, pose_gt_num)
 
                 # Continue if sequence not long enough
                 if last_frame == -1 or not(last_frame in poses_result.keys()) or not(first_frame in poses_result.keys()):
@@ -575,13 +625,18 @@ class kittiOdomEval():
         ave_errs = {}
         ate_errs = {}       
         for seq in self.eval_seqs:
+            seq_num = int(seq[3:])
+            if(seq_num < 10):
+                seq_num = '0' + str(seq_num)
+            else:
+                seq_num = str(seq_num)
             eva_seq_dir = os.path.join(self.dataset_dir, seq)
             if not os.path.exists(eva_seq_dir): 
                 print("Dir %s couldn't open!"%(eva_seq_dir))
                 exit() 
             pred_file_name = os.path.join(eva_seq_dir, self.pose_dir)
             # pred_file_name = self.result_dir + '/{}.txt'.format(seq)
-            gt_file_name = os.path.join(eva_seq_dir, self.gt_dir)
+            gt_file_name = os.path.join("/media/oliver/Elements SE/dataset/kitti_360/data_poses/2013_05_28_drive_00" + seq_num + "_sync", self.gt_dir)
             #gt_file_name   = self.gt_dir + '/{}.txt'.format(seq)
             save_file_name = eva_seq_dir + '/{}.pdf'.format(seq)
             assert os.path.exists(pred_file_name), "File path error: {}".format(pred_file_name)
@@ -595,7 +650,7 @@ class kittiOdomEval():
             #     self.call_evo_traj(pred_file_name, save_file_name, gt_file=None)
             #     continue
             
-            poses_result = self.loadPoses(pred_file_name, toCameraCoord=toCameraCoord, format = self.pose_format)
+            poses_result = self.loadPoses(pred_file_name, toCameraCoord=False, format = self.pose_format, seq_num = seq_num)
             # if not os.path.exists(eva_seq_dir): os.makedirs(eva_seq_dir) 
 
             if not os.path.exists(gt_file_name):
@@ -609,7 +664,7 @@ class kittiOdomEval():
                 self.plotPath_2D_3(seq, None, poses_result, eva_seq_dir)
                 continue
           
-            poses_gt = self.loadPoses(gt_file_name, toCameraCoord=False, format = self.pose_format)
+            poses_gt = self.loadgtPoses(gt_file_name, toCameraCoord=True, pose_ref=poses_result, seq_num = seq_num)
 
             # ----------------------------------------------------------------------
             # compute sequence errors
@@ -741,14 +796,14 @@ if __name__ == '__main__':
     dir_path = os.path.dirname(os.path.dirname(file_path)) # '/home/oliver/catkin_ros2/src/kiss-icp/results
     parser = argparse.ArgumentParser(description='KITTI Evaluation toolkit')
     parser.add_argument('--dataset_dir',type=str, default=dir_path + '/230719_r_kissicp', help='Directory path of the testing dataset') # + '/230627_mul'
-    parser.add_argument('--gt_dir',     type=str, default='gt_path.txt',  help='Filename of the ground truth odometry')
+    parser.add_argument('--gt_dir',     type=str, default='poses.txt',  help='Filename of the ground truth odometry')
     parser.add_argument('--pose_dir',     type=str, default='path.txt',  help='Filename of evaluated odometry')
     parser.add_argument('--eva_seqs',   type=str, default='*',      help='The sequences to be evaluated, split by (,), or (*)')
     parser.add_argument('--pose_format',     type=str, default='tum',  help='Format of the pose file, kitti or tum')
     # parser.add_argument('--gt_dir',     type=str, default='./ground_truth_pose',  help='Directory path of the ground truth odometry')
     # parser.add_argument('--result_dir', type=str, default='./data/',              help='Directory path of storing the odometry results')
     # parser.add_argument('--eva_seqs',   type=str, default='09_pred,10_pred,11_pred',      help='The sequences to be evaluated') 
-    parser.add_argument('--toCameraCoord',   type=lambda x: (str(x).lower() == 'true'), default=False, help='Whether to convert the pose to camera coordinate')
+    parser.add_argument('--toCameraCoord',   type=lambda x: (str(x).lower() == 'true'), default=True, help='Whether to convert the pose to camera coordinate')
 
     args = parser.parse_args()
     pose_eval = kittiOdomEval(args)
