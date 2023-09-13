@@ -28,8 +28,12 @@ class kittiOdomEval():
         self.num_lengths = len(self.lengths)
         self.gt_dir     = config.gt_dir
         self.pose_dir  = config.pose_dir
-        self.dataset_dir = config.dataset_dir
-        self.eval_seqs  = []
+        self.sage_dir = config.sage_dir
+        self.kiss_dir = config.kiss_dir
+        self.range_dir = config.range_dir
+        self.eval_seqs_sage  = []
+        self.eval_seqs_kiss = []
+        self.eval_seqs_range = []
         self.pose_format = config.pose_format
         # gt_files = glob.glob(config.gt_dir + '/*.txt')
         # gt_files = [os.path.split(f)[1] for f in gt_files]
@@ -37,21 +41,49 @@ class kittiOdomEval():
         
         # evalute all files in the folder
         if config.eva_seqs == '*':
-            if not os.path.exists(self.dataset_dir):
+            if not os.path.exists(self.sage_dir):
                 print('File path error!')
                 exit()
-            for name in os.listdir(self.dataset_dir):
+            for name in os.listdir(self.sage_dir):
                 # 获取name前三位字符
 
                 if (name[0:3] != "seq"): continue
 
-                if os.path.isdir(os.path.join(self.dataset_dir, name)):
-                    self.eval_seqs.append(str(name))
+                if os.path.isdir(os.path.join(self.sage_dir, name)):
+                    self.eval_seqs_sage.append(str(name))
+                
             # 排序eval_seqs
-            self.eval_seqs.sort(key=takeSort)
+            self.eval_seqs_sage.sort(key=takeSort)
+
+            for name in os.listdir(self.kiss_dir):
+                # 获取name前三位字符
+
+                if (name[0:3] != "seq"): continue
+
+                if os.path.isdir(os.path.join(self.kiss_dir, name)):
+                    self.eval_seqs_kiss.append(str(name))
+            
+            # 排序eval_seqs
+            self.eval_seqs_kiss.sort(key=takeSort)
+
+            for name in os.listdir(self.range_dir):
+                # 获取name前三位字符
+
+                if (name[0:3] != "seq"): continue
+
+                if os.path.isdir(os.path.join(self.range_dir, name)):
+                    self.eval_seqs_range.append(str(name))
+            
+            # 排序eval_seqs
+            self.eval_seqs_range.sort(key=takeSort)
+
+
+
         else:
             seqs = config.eva_seqs.split(',')
-            self.eval_seqs = [str(s) for s in seqs]
+            self.eval_seqs_kiss = [str(s) for s in seqs]
+            self.eval_seqs_sage = [str(s) for s in seqs]
+            self.eval_seqs_range = [str(s) for s in seqs]
 
 
         # # Ref: https://github.com/MichaelGrupp/evo/wiki/Plotting
@@ -74,7 +106,7 @@ class kittiOdomEval():
         rot = np.matmul(Tr_inv, np.matmul(pose_mat, Tr))
         return rot 
 
-    def loadPoses(self, file_name, toCameraCoord, format, seq_num):
+    def loadPoses(self, file_name, toCameraCoord, format):
         '''
             Each line in the file should follow one of the following structures
             time x y z rx ry rz rw
@@ -98,10 +130,7 @@ class kittiOdomEval():
                 r = Rotation.from_quat(q)
                 rot_mat = r.as_matrix()
                 P[0:3, 0:3] = rot_mat
-                if seq_num == "02":
-                    frame_idx = 4391 + cnt
-                else:
-                    frame_idx = cnt
+                frame_idx = cnt
             elif(format == 'kitti'):
                 withIdx = int(len(line_split)==13)
                 for row in range(3):
@@ -120,44 +149,6 @@ class kittiOdomEval():
                 poses[frame_idx] = P
         return poses
     
-    def loadgtPoses(self, file_name, toCameraCoord, pose_ref, seq_num):
-        '''
-            Each line in the file should follow one of the following structures
-            time x y z rx ry rz rw
-        '''
-        f = open(file_name, 'r')
-        s = f.readlines()
-        f.close()
-        file_len = len(s)
-        poses = {}
-        frame_idx = 0
-        gt_t_p = np.eye(4)
-        untrans = True
-        for cnt, line in enumerate(s):
-            P = np.eye(4)
-            line_split = [float(i) for i in line.split()]
-
-            withIdx = int(len(line_split)==13)
-            for row in range(3):
-                for col in range(4):
-                    P[row, col] = line_split[row*4 + col + withIdx]
-            if withIdx:
-                frame_idx = int(line_split[0])
-            else:
-                frame_idx = cnt
-            if (seq_num == "02") and (frame_idx < 4391):
-                continue
-            if toCameraCoord:
-                poses[frame_idx] = self.toCameraCoord(P)
-            else:
-                poses[frame_idx] = P
-            if untrans:
-                gt_t_p = np.matmul(pose_ref[frame_idx], np.linalg.inv(poses[frame_idx]))
-                poses[frame_idx] = np.matmul(gt_t_p, poses[frame_idx])
-                untrans = False
-            else:
-                poses[frame_idx] = np.matmul(gt_t_p, poses[frame_idx])
-        return poses
 
     def trajectoryDistances(self, poses):
         '''
@@ -343,14 +334,16 @@ class kittiOdomEval():
         # plt.show()
         pdf.close()
 
-    def plotPath_2D_3(self, seq, poses_gt, poses_result, plot_path_dir):
+    def plotPath_2D_3(self, seq, poses_gt, poses_result, poses_result2, poses_result3, plot_path_dir):
         '''
             plot path in XY, XZ and YZ plane
         '''
-        fontsize_ = 10
-        plot_keys = ["Ground Truth", "Ours"]
+        fontsize_ = 12
+        plot_keys = ['Ground Truth', 'KISS-ICP', 'Ours-RangeNet', 'Ours-Cylinder3D']
         start_point = [0, 0]
-        style_pred = 'b-'
+        style_pred = 'g-'
+        style_pred2 = 'b-'
+        style_pred3 = 'k-'
         style_gt = 'r-'
         style_O = 'ko'
 
@@ -364,17 +357,28 @@ class kittiOdomEval():
         x_pred = np.asarray([pose[0,3] for _,pose in poses_result])
         y_pred = np.asarray([pose[1,3] for _,pose in poses_result])
         z_pred = np.asarray([pose[2,3] for _,pose in poses_result])
+        poses_result2 = [(k,poses_result2[k]) for k in sorted(poses_result2.keys())]
+        x_pred2 = np.asarray([pose[0,3] for _,pose in poses_result2])
+        y_pred2 = np.asarray([pose[1,3] for _,pose in poses_result2])
+        z_pred2 = np.asarray([pose[2,3] for _,pose in poses_result2])
+        poses_result3 = [(k,poses_result3[k]) for k in sorted(poses_result3.keys())]
+        x_pred3 = np.asarray([pose[0,3] for _,pose in poses_result3])
+        y_pred3 = np.asarray([pose[1,3] for _,pose in poses_result3])
+        z_pred3 = np.asarray([pose[2,3] for _,pose in poses_result3])
         
         fig = plt.figure(figsize=(20,6), dpi=100)
         ### plot the figure
         plt.subplot(1,3,1)
         ax = plt.gca()
         if poses_gt: plt.plot(x_gt, z_gt, style_gt, label=plot_keys[0])
-        plt.plot(x_pred, z_pred, style_pred, label=plot_keys[1])
+        plt.plot(x_pred2, z_pred2, style_pred2, label=plot_keys[1])
+        plt.plot(x_pred3, z_pred3, style_pred3, label=plot_keys[2])
+        plt.plot(x_pred, z_pred, style_pred, label=plot_keys[3])
         plt.plot(start_point[0], start_point[1], style_O, label='Start Point')
-        plt.legend(loc="upper right", prop={'size':fontsize_})
-        plt.xlabel('x (m)', fontsize=fontsize_)
-        plt.ylabel('z (m)', fontsize=fontsize_)
+        plt.legend(loc="upper left", prop={'size':10})
+        plt.xlabel('x (m)', fontsize=15)
+        plt.ylabel('z (m)', fontsize=15)
+        plt.tick_params(axis='both', which='major', labelsize=fontsize_)
         ### set the range of x and y
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
@@ -390,11 +394,14 @@ class kittiOdomEval():
         plt.subplot(1,3,2)
         ax = plt.gca()
         if poses_gt: plt.plot(x_gt, y_gt, style_gt, label=plot_keys[0])
-        plt.plot(x_pred, y_pred, style_pred, label=plot_keys[1])
+        plt.plot(x_pred2, y_pred2, style_pred2, label=plot_keys[1])
+        plt.plot(x_pred3, y_pred3, style_pred3, label=plot_keys[2])
+        plt.plot(x_pred, y_pred, style_pred, label=plot_keys[3])
         plt.plot(start_point[0], start_point[1], style_O, label='Start Point')
-        plt.legend(loc="upper right", prop={'size':fontsize_})
-        plt.xlabel('x (m)', fontsize=fontsize_)
-        plt.ylabel('y (m)', fontsize=fontsize_)
+        plt.legend(loc="upper left", prop={'size':10})
+        plt.xlabel('x (m)', fontsize=15)
+        plt.ylabel('y (m)', fontsize=15)
+        plt.tick_params(axis='both', which='major', labelsize=fontsize_)
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
         xmean = np.mean(xlim)
@@ -405,11 +412,14 @@ class kittiOdomEval():
         plt.subplot(1,3,3)
         ax = plt.gca()
         if poses_gt: plt.plot(y_gt, z_gt, style_gt, label=plot_keys[0])
-        plt.plot(y_pred, z_pred, style_pred, label=plot_keys[1])
+        plt.plot(y_pred2, z_pred2, style_pred2, label=plot_keys[1])
+        plt.plot(y_pred3, z_pred3, style_pred3, label=plot_keys[2])
+        plt.plot(y_pred, z_pred, style_pred, label=plot_keys[3])
         plt.plot(start_point[0], start_point[1], style_O, label='Start Point')
-        plt.legend(loc="upper right", prop={'size':fontsize_})
-        plt.xlabel('y (m)', fontsize=fontsize_)
-        plt.ylabel('z (m)', fontsize=fontsize_)
+        plt.legend(loc="upper left", prop={'size':10})
+        plt.xlabel('y (m)', fontsize=15)
+        plt.ylabel('z (m)', fontsize=15)
+        plt.tick_params(axis='both', which='major', labelsize=fontsize_)
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
         xmean = np.mean(xlim)
@@ -417,7 +427,7 @@ class kittiOdomEval():
         ax.set_xlim([xmean - plot_radius, xmean + plot_radius])
         ax.set_ylim([ymean - plot_radius, ymean + plot_radius])
 
-        png_title = "{}_path".format(seq)
+        png_title = "{}_comparepath".format(seq)
         plt.savefig(plot_path_dir +  "/" + png_title + ".png", bbox_inches='tight', pad_inches=0.1)
         pdf = matplotlib.backends.backend_pdf.PdfPages(plot_path_dir +  "/" + png_title + ".pdf")        
         fig.tight_layout()
@@ -486,7 +496,7 @@ class kittiOdomEval():
         # plt.show()
         plt.close()
 
-    def plotError_segment(self, seq, avg_segment_errs, plot_error_dir):
+    def plotError_segment(self, seq, avg_segment_errs, avg_segment_errs2, avg_segment_errs3, plot_error_dir):
         '''
             avg_segment_errs: dict [100: err, 200: err...]
         '''
@@ -494,6 +504,14 @@ class kittiOdomEval():
         plot_y_t = []
         plot_y_r = []
         plot_x = []
+        plot_y_t2 = []
+        plot_y_r2 = []
+        plot_x2 = []
+        plot_y_t3 = []
+        plot_y_r3 = []
+        plot_x3 = []
+        plot_keys = ["Ground Truth", "Ours-Cylinder3D", 'KISS-ICP', 'Ours-RangeNet']
+
         for idx, value in avg_segment_errs.items():
             if value == []:
                 continue
@@ -501,21 +519,77 @@ class kittiOdomEval():
             plot_y_t.append(value[0] * 100)
             plot_y_r.append(value[1]/np.pi * 180)
         
+        for idx, value in avg_segment_errs2.items():
+            if value == []:
+                continue
+            plot_x2.append(idx)
+            plot_y_t2.append(value[0] * 100)
+            plot_y_r2.append(value[1]/np.pi * 180)
+        
+        for idx, value in avg_segment_errs3.items():
+            if value == []:
+                continue
+            plot_x3.append(idx)
+            plot_y_t3.append(value[0] * 100)
+            plot_y_r3.append(value[1]/np.pi * 180)
+        
         fig = plt.figure(figsize=(15,6), dpi=100)
         plt.subplot(1,2,1)
-        plt.plot(plot_x, plot_y_t, 'ks-')
-        plt.axis([100, np.max(plot_x), 0, np.max(plot_y_t)*(1+0.1)])
+        plt.plot(plot_x2, plot_y_t2, 'bs-', label=plot_keys[2])
+        plt.plot(plot_x3, plot_y_t3, 'ks-', label=plot_keys[3])
+        plt.plot(plot_x, plot_y_t, 'gs-', label=plot_keys[1])
+        # plt.axis([100, np.max(plot_x), 0, np.max(plot_y_t+plot_y_t2+plot_y_t3)*(1+0.1)])
+        plt.axis([100, np.max(plot_x), np.min(plot_y_t+plot_y_t2+plot_y_t3)*(1-0.1), np.max(plot_y_t+plot_y_t2+plot_y_t3)*(1+0.2)])
         plt.xlabel('Path Length (m)',fontsize=fontsize_)
         plt.ylabel('Translation Error (%)',fontsize=fontsize_)
+        plt.legend(loc="upper right", prop={'size':10})
+        plt.tick_params(axis='both', which='major', labelsize=12)
 
         plt.subplot(1,2,2)
-        plt.plot(plot_x, plot_y_r, 'ks-')
-        plt.axis([100, np.max(plot_x), 0, np.max(plot_y_r)*(1+0.1)])
+        plt.plot(plot_x2, plot_y_r2, 'bs-', label=plot_keys[2])
+        plt.plot(plot_x3, plot_y_r3, 'ks-', label=plot_keys[3])
+        plt.plot(plot_x, plot_y_r, 'gs-', label=plot_keys[1])
+        # plt.axis([100, np.max(plot_x), 0, np.max(plot_y_r+plot_y_r2+plot_y_r3)*(1+0.1)])
+        plt.axis([100, np.max(plot_x), np.min(plot_y_r+plot_y_r2+plot_y_r3)*(1-0.1), np.max(plot_y_r+plot_y_r2+plot_y_r3)*(1+0.2)])
         plt.xlabel('Path Length (m)',fontsize=fontsize_)
         plt.ylabel('Rotation Error (deg/m)',fontsize=fontsize_)
-        png_title = "{}_error_seg".format(seq)
+        plt.legend(loc="upper right", prop={'size':10})
+        plt.tick_params(axis='both', which='major', labelsize=12)
+        png_title = "{}_error_seg_compare".format(seq)
         plt.savefig(plot_error_dir +  "/" + png_title + ".png", bbox_inches='tight', pad_inches=0.1)
         # plt.show()
+
+        # fig2, more clear
+        fig2 = plt.figure(figsize=(6,6),dpi=1000)
+        plt.clf()              # 清除之前画的图
+        plt.cla()              # 清除之前画的轴
+        plt.plot(plot_x2, plot_y_t2, 'bs-', label=plot_keys[2])
+        plt.plot(plot_x3, plot_y_t3, 'ks-', label=plot_keys[3])
+        plt.plot(plot_x, plot_y_t, 'gs-', label=plot_keys[1])
+        # plt.axis([100, np.max(plot_x), 0, np.max(plot_y_t+plot_y_t2+plot_y_t3)*(1+0.1)])
+        plt.axis([100, np.max(plot_x), np.min(plot_y_t+plot_y_t2+plot_y_t3)*(1-0.1), np.max(plot_y_t+plot_y_t2+plot_y_t3)*(1+0.2)])
+        plt.xlabel('Path Length (m)',fontsize=fontsize_)
+        plt.ylabel('Translation Error (%)',fontsize=fontsize_)
+        plt.legend(loc="upper right", prop={'size':15})
+        plt.tick_params(axis='both', which='major', labelsize=15)
+        png_title = "{}_error_seg_compare_t".format(seq)
+        plt.savefig(plot_error_dir +  "/" + png_title + ".svg", bbox_inches='tight', pad_inches=0)
+        plt.clf()              # 清除之前画的图
+        plt.cla()              # 清除之前画的轴
+        plot_y_r2 = (np.array(plot_y_r2)*100).tolist()
+        plot_y_r3 = (np.array(plot_y_r3)*100).tolist()
+        plot_y_r = (np.array(plot_y_r)*100).tolist()
+        plt.plot(plot_x2, plot_y_r2, 'bs-', label=plot_keys[2])
+        plt.plot(plot_x3, plot_y_r3, 'ks-', label=plot_keys[3])
+        plt.plot(plot_x, plot_y_r, 'gs-', label=plot_keys[1])
+        # plt.axis([100, np.max(plot_x), 0, np.max(plot_y_r+plot_y_r2+plot_y_r3)*(1+0.1)])
+        plt.axis([100, np.max(plot_x), np.min(plot_y_r+plot_y_r2+plot_y_r3)*(1-0.1), np.max(plot_y_r+plot_y_r2+plot_y_r3)*(1+0.2)])
+        plt.xlabel('Path Length (m)',fontsize=fontsize_)
+        plt.ylabel('Rotation Error (deg/100m)',fontsize=fontsize_)
+        plt.legend(loc="upper right", prop={'size':15})
+        plt.tick_params(axis='both', which='major', labelsize=15)
+        png_title = "{}_error_seg_compare_r".format(seq)
+        plt.savefig(plot_error_dir +  "/" + png_title + ".svg", bbox_inches='tight', pad_inches=0)
 
     def plotError_speed(self, seq, avg_speed_errs, plot_error_dir):
         '''
@@ -622,25 +696,36 @@ class kittiOdomEval():
         # if not os.path.exists(eval_dir): os.makedirs(eval_dir)
 
         total_err = []
+        total_err2 = []
+        total_err3 = []
         ave_errs = {}
-        ate_errs = {}       
-        for seq in self.eval_seqs:
+        ave_errs2 = {}
+        ave_errs3 = {}
+        # ate_errs = {}
+        # ate_errs2 = {}
+        # ate_errs3 = {}       
+        for seq in self.eval_seqs_sage:
             seq_num = int(seq[3:])
             if(seq_num < 10):
                 seq_num = '0' + str(seq_num)
             else:
                 seq_num = str(seq_num)
-            eva_seq_dir = os.path.join(self.dataset_dir, seq)
+            eva_seq_dir = os.path.join(self.sage_dir, seq)
+            eva_seq_dir2 = os.path.join(self.kiss_dir, seq)
+            eva_seq_dir3 = os.path.join(self.range_dir, seq)
             if not os.path.exists(eva_seq_dir): 
                 print("Dir %s couldn't open!"%(eva_seq_dir))
                 exit() 
             pred_file_name = os.path.join(eva_seq_dir, self.pose_dir)
+            pred_file_name2 = os.path.join(eva_seq_dir2, self.pose_dir)
+            pred_file_name3 = os.path.join(eva_seq_dir3, self.pose_dir)
             # pred_file_name = self.result_dir + '/{}.txt'.format(seq)
-            gt_file_name = os.path.join("/media/oliver/Elements SE/dataset/kitti_360/data_poses/2013_05_28_drive_00" + seq_num + "_sync", self.gt_dir)
+            gt_file_name = os.path.join(eva_seq_dir, self.gt_dir)
             #gt_file_name   = self.gt_dir + '/{}.txt'.format(seq)
             save_file_name = eva_seq_dir + '/{}.pdf'.format(seq)
             assert os.path.exists(pred_file_name), "File path error: {}".format(pred_file_name)
-            # assert os.path.exists(gt_file_name), "File path error: {}".format(gt_file_name)
+            assert os.path.exists(pred_file_name2), "File path error: {}".format(pred_file_name2)
+            assert os.path.exists(pred_file_name3), "File path error: {}".format(pred_file_name3)
             
             # ----------------------------------------------------------------------
             # load pose
@@ -650,65 +735,68 @@ class kittiOdomEval():
             #     self.call_evo_traj(pred_file_name, save_file_name, gt_file=None)
             #     continue
             
-            poses_result = self.loadPoses(pred_file_name, toCameraCoord=False, format = self.pose_format, seq_num = seq_num)
-            # if not os.path.exists(eva_seq_dir): os.makedirs(eva_seq_dir) 
-
-            if not os.path.exists(gt_file_name):
-                self.calcSequenceErrors(poses_result, poses_result)
-                print ("\nSequence: " + str(seq))
-                print ('Distance (m): %d' % self.distance)
-                print ('Max speed (km/h): %d' % (self.max_speed*3.6))
-                self.plot_rpy(seq, None, poses_result, eva_seq_dir)
-                self.plot_xyz(seq, None, poses_result, eva_seq_dir)
-                self.plotPath_3D(seq, None, poses_result, eva_seq_dir)
-                self.plotPath_2D_3(seq, None, poses_result, eva_seq_dir)
-                continue
+            poses_result = self.loadPoses(pred_file_name, toCameraCoord=False, format = self.pose_format)
+            poses_result2 = self.loadPoses(pred_file_name2, toCameraCoord=False, format = self.pose_format)
+            poses_result3 = self.loadPoses(pred_file_name3, toCameraCoord=False, format = self.pose_format)
           
-            poses_gt = self.loadgtPoses(gt_file_name, toCameraCoord=True, pose_ref=poses_result, seq_num = seq_num)
+            poses_gt = self.loadPoses(gt_file_name, toCameraCoord=False, format = self.pose_format)
 
             # ----------------------------------------------------------------------
             # compute sequence errors
             seq_err = self.calcSequenceErrors(poses_gt, poses_result)
-            self.saveSequenceErrors(seq_err, eva_seq_dir + '/{}_error.txt'.format(seq))
+            seq_err2 = self.calcSequenceErrors(poses_gt, poses_result2)
+            seq_err3 = self.calcSequenceErrors(poses_gt, poses_result3)
+            # self.saveSequenceErrors(seq_err, eva_seq_dir + '/{}_error.txt'.format(seq))
 
             total_err += seq_err
+            total_err2 += seq_err2
+            total_err3 += seq_err3
+
 
             # ----------------------------------------------------------------------
             # Compute segment errors
             avg_segment_errs = self.computeSegmentErr(seq_err)
-            avg_speed_errs   = self.computeSpeedErr(seq_err)
+            # avg_speed_errs   = self.computeSpeedErr(seq_err)
+            avg_segment_errs2 = self.computeSegmentErr(seq_err2)
+            # avg_speed_errs2   = self.computeSpeedErr(seq_err2)
+            avg_segment_errs3 = self.computeSegmentErr(seq_err3)
+            # avg_speed_errs3   = self.computeSpeedErr(seq_err3)
 
             # ----------------------------------------------------------------------
             # compute overall error
             ave_t_err, ave_r_err = self.computeOverallErr(seq_err)
+            ave_t_err2, ave_r_err2 = self.computeOverallErr(seq_err2)
+            ave_t_err3, ave_r_err3 = self.computeOverallErr(seq_err3)
 
             # ----------------------------------------------------------------------
             # compute absolute error
-            ate_rot, ate_trans = absolute_trajectory_error(list(poses_gt.values()), list(poses_result.values()))
+            # ate_rot, ate_trans = absolute_trajectory_error(list(poses_gt.values()), list(poses_result.values()))
 
             print ("\nSequence: " + str(seq))
             print ('Distance (m): %d' % self.distance)
             print ('Max speed (km/h): %d' % (self.max_speed*3.6))
             print ("Average sequence translational RMSE (%):   {0:.4f}".format(ave_t_err * 100))
             print ("Average sequence rotational error (deg/m): {0:.4f}".format(ave_r_err/np.pi * 180))
-            print ("Absoulte Trajectory Error (ATE) (m): {0:.4f}".format(ate_trans))
-            print ("Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(ate_rot))
-            with open(eva_seq_dir + '/%s_stats.txt' % seq, 'w') as f:
-                f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
-                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_r_err/np.pi * 180))
-                f.writelines("Absoulte Trajectory Error (ATE) (m): {0:.4f}\n".format(ate_trans))
-                f.writelines("Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(ate_rot))
+            # print ("Absoulte Trajectory Error (ATE) (m): {0:.4f}".format(ate_trans))
+            # print ("Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(ate_rot))
+            # with open(eva_seq_dir + '/%s_stats.txt' % seq, 'w') as f:
+            #     f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
+            #     f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_r_err/np.pi * 180))
+            #     f.writelines("Absoulte Trajectory Error (ATE) (m): {0:.4f}\n".format(ate_trans))
+            #     f.writelines("Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(ate_rot))
             ave_errs[seq] = [ave_t_err, ave_r_err]
-            ate_errs[seq] = [ate_trans, ate_rot]
+            ave_errs2[seq] = [ave_t_err2, ave_r_err2]
+            ave_errs3[seq] = [ave_t_err3, ave_r_err3]
+            # ate_errs[seq] = [ate_trans, ate_rot]
 
             # ----------------------------------------------------------------------
             # Ploting
-            self.plot_rpy(seq, poses_gt, poses_result, eva_seq_dir)
-            self.plot_xyz(seq, poses_gt, poses_result, eva_seq_dir)
-            self.plotPath_3D(seq, poses_gt, poses_result, eva_seq_dir)
-            self.plotPath_2D_3(seq, poses_gt, poses_result, eva_seq_dir)
-            self.plotError_segment(seq, avg_segment_errs, eva_seq_dir)
-            self.plotError_speed(seq, avg_speed_errs, eva_seq_dir)
+            # self.plot_rpy(seq, poses_gt, poses_result, eva_seq_dir)
+            # self.plot_xyz(seq, poses_gt, poses_result, eva_seq_dir)
+            # self.plotPath_3D(seq, poses_gt, poses_result, eva_seq_dir)
+            self.plotPath_2D_3(seq, poses_gt, poses_result, poses_result2, poses_result3, eva_seq_dir)
+            self.plotError_segment(seq, avg_segment_errs, avg_segment_errs2, avg_segment_errs3, eva_seq_dir)
+            # self.plotError_speed(seq, avg_speed_errs, eva_seq_dir)
 
             plt.close('all')
 
@@ -720,51 +808,53 @@ class kittiOdomEval():
 
 
         total_avg_segment_errs = self.computeSegmentErr(total_err)
-        total_avg_speed_errs   = self.computeSpeedErr(total_err)
+        total_avg_segment_errs2 = self.computeSegmentErr(total_err2)
+        total_avg_segment_errs3 = self.computeSegmentErr(total_err3)
+        # total_avg_speed_errs   = self.computeSpeedErr(total_err)
         # compute overall error
-        ave_t_err, ave_r_err = self.computeOverallErr(total_err)
-        # compute mean error
-        mean_t_err = 0
-        mean_r_err = 0
-        for seq, ave_err in ave_errs.items():
-            mean_t_err += ave_err[0]
-            mean_r_err += ave_err[1]
-        mean_t_err /= len(ave_errs)
-        mean_r_err /= len(ave_errs)
-        mean_at_err = 0
-        mean_ar_err = 0
-        for seq, ate_err in ate_errs.items():
-            mean_at_err += ate_err[0]
-            mean_ar_err += ate_err[1]
-        mean_at_err /= len(ate_errs)
-        mean_ar_err /= len(ate_errs)
-        print ("\nSequence All: ")
-        print ("Average sequence translational RMSE (%):   {0:.4f}".format(ave_t_err * 100))
-        print ("Average sequence rotational error (deg/m): {0:.4f}".format(ave_r_err/np.pi * 180))
-        print ("Mean sequence translational RMSE (%):   {0:.4f}".format(mean_t_err * 100))
-        print ("Mean sequence rotational error (deg/m): {0:.4f}".format(mean_r_err/np.pi * 180))
-        print ("Mean Absoulte Trajectory Error (ATE) (m): {0:.4f}".format(mean_at_err))
-        print ("Mean Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(mean_ar_err))
-        with open(self.dataset_dir + '/total_stats.txt', 'w') as f:
-            f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
-            f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_r_err/np.pi * 180))
-            f.writelines('Mean sequence translation RMSE (%):    {0:.4f}\n'.format(mean_t_err * 100))
-            f.writelines('Mean sequence rotation error (deg/m):  {0:.4f}\n'.format(mean_r_err/np.pi * 180))
-            f.writelines("Mean Absoulte Trajectory Error (ATE) (m): {0:.4f}\n".format(mean_at_err))
-            f.writelines("Mean Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(mean_ar_err))
-            f.writelines('\n\n')
-            for seq, ave_err in ave_errs.items():
-                f.writelines('%s:\n' % seq)
-                f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_err[0] * 100))
-                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_err[1]/np.pi * 180))
-                f.writelines("Absoulte Trajectory Error (ATE) (m): {0:.4f}\n".format(ate_errs[seq][0]))
-                f.writelines("Absoulte Rotational Error (ARE) (rad): {0:.4f}\n\n".format(ate_errs[seq][1]))
+        # ave_t_err, ave_r_err = self.computeOverallErr(total_err)
+        # # compute mean error
+        # mean_t_err = 0
+        # mean_r_err = 0
+        # for seq, ave_err in ave_errs.items():
+        #     mean_t_err += ave_err[0]
+        #     mean_r_err += ave_err[1]
+        # mean_t_err /= len(ave_errs)
+        # mean_r_err /= len(ave_errs)
+        # mean_at_err = 0
+        # mean_ar_err = 0
+        # for seq, ate_err in ate_errs.items():
+        #     mean_at_err += ate_err[0]
+        #     mean_ar_err += ate_err[1]
+        # mean_at_err /= len(ate_errs)
+        # mean_ar_err /= len(ate_errs)
+        # print ("\nSequence All: ")
+        # print ("Average sequence translational RMSE (%):   {0:.4f}".format(ave_t_err * 100))
+        # print ("Average sequence rotational error (deg/m): {0:.4f}".format(ave_r_err/np.pi * 180))
+        # print ("Mean sequence translational RMSE (%):   {0:.4f}".format(mean_t_err * 100))
+        # print ("Mean sequence rotational error (deg/m): {0:.4f}".format(mean_r_err/np.pi * 180))
+        # print ("Mean Absoulte Trajectory Error (ATE) (m): {0:.4f}".format(mean_at_err))
+        # print ("Mean Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(mean_ar_err))
+        # with open(self.dataset_dir + '/total_stats.txt', 'w') as f:
+        #     f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
+        #     f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_r_err/np.pi * 180))
+        #     f.writelines('Mean sequence translation RMSE (%):    {0:.4f}\n'.format(mean_t_err * 100))
+        #     f.writelines('Mean sequence rotation error (deg/m):  {0:.4f}\n'.format(mean_r_err/np.pi * 180))
+        #     f.writelines("Mean Absoulte Trajectory Error (ATE) (m): {0:.4f}\n".format(mean_at_err))
+        #     f.writelines("Mean Absoulte Rotational Error (ARE) (rad): {0:.4f}\n".format(mean_ar_err))
+        #     f.writelines('\n\n')
+        #     for seq, ave_err in ave_errs.items():
+        #         f.writelines('%s:\n' % seq)
+        #         f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_err[0] * 100))
+        #         f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_err[1]/np.pi * 180))
+        #         f.writelines("Absoulte Trajectory Error (ATE) (m): {0:.4f}\n".format(ate_errs[seq][0]))
+        #         f.writelines("Absoulte Rotational Error (ARE) (rad): {0:.4f}\n\n".format(ate_errs[seq][1]))
 
 
         # ----------------------------------------------------------------------
         # Ploting       
-        self.plotError_segment('total_error_seg', total_avg_segment_errs, self.dataset_dir)
-        self.plotError_speed('total_error_speed', total_avg_speed_errs, self.dataset_dir)
+        self.plotError_segment('total_error_seg', total_avg_segment_errs, total_avg_segment_errs2, total_avg_segment_errs3, self.sage_dir)
+        # self.plotError_speed('total_error_speed', total_avg_speed_errs, self.dataset_dir)
 
 
         # if ave_errs:
@@ -795,8 +885,10 @@ if __name__ == '__main__':
     # 获取当前文件所在的目录
     dir_path = os.path.dirname(os.path.dirname(file_path)) # '/home/oliver/catkin_ros2/src/kiss-icp/results
     parser = argparse.ArgumentParser(description='KITTI Evaluation toolkit')
-    parser.add_argument('--dataset_dir',type=str, default=dir_path + '/kitti360_range', help='Directory path of the testing dataset') # + '/230627_mul'
-    parser.add_argument('--gt_dir',     type=str, default='poses.txt',  help='Filename of the ground truth odometry')
+    parser.add_argument('--sage_dir',type=str, default=dir_path + '/kitti360t_sem', help='Directory path of the testing dataset')
+    parser.add_argument('--kiss_dir',type=str, default=dir_path + '/kitti360t_kissicp', help='Directory path of the testing dataset')
+    parser.add_argument('--range_dir',type=str, default=dir_path + '/kitti360t_range', help='Directory path of the testing dataset')
+    parser.add_argument('--gt_dir',     type=str, default='gt_path.txt',  help='Filename of the ground truth odometry')
     parser.add_argument('--pose_dir',     type=str, default='path.txt',  help='Filename of evaluated odometry')
     parser.add_argument('--eva_seqs',   type=str, default='*',      help='The sequences to be evaluated, split by (,), or (*)')
     parser.add_argument('--pose_format',     type=str, default='tum',  help='Format of the pose file, kitti or tum')
